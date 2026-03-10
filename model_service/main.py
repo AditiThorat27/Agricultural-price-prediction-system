@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime
 
@@ -12,9 +13,11 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="Market Recommender Model Service")
-
 SERVICE_DIR = Path(__file__).resolve().parent
+
+# Populated by the lifespan hook at startup.
+commodity_models: dict = {}
+_startup_error: str | None = None
 
 
 class PredictionRequest(BaseModel):
@@ -25,7 +28,7 @@ class PredictionRequest(BaseModel):
 
 def _resolve_model_dir() -> Path:
     """Return the models directory, supporting both local and Docker layouts."""
-    # Docker: models mounted as a sibling dir inside /app
+    # Docker: models are mounted as a subdirectory of /app (i.e. /app/models)
     docker_path = SERVICE_DIR / "models"
     if docker_path.is_dir():
         return docker_path
@@ -33,8 +36,8 @@ def _resolve_model_dir() -> Path:
     return SERVICE_DIR.parent / "models"
 
 
-def load_models():
-    """Load all commodity models at startup."""
+def load_models() -> dict:
+    """Load all commodity models from disk and return them keyed by name."""
     base_dir = _resolve_model_dir()
     model_names = ["onion", "potato", "tomato"]
 
@@ -50,7 +53,21 @@ def load_models():
     return models
 
 
-commodity_models = load_models()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load models on startup; surface errors via /health instead of crashing."""
+    global commodity_models, _startup_error
+    try:
+        commodity_models = load_models()
+    except Exception as exc:
+        _startup_error = str(exc)
+        logger.error("Failed to load models at startup: %s", exc)
+    yield
+    commodity_models = {}
+    _startup_error = None
+
+
+app = FastAPI(title="Market Recommender Model Service", lifespan=lifespan)
 
 
 def _get_feature_names(model) -> list[str]:
@@ -71,6 +88,12 @@ def _get_pandas_categories(model) -> list[list[str]]:
 def _build_placeholder_features(
     commodity: str, model, lat: float, lon: float, mandi_override: str | None = None,
 ) -> pd.DataFrame:
+    """Build a single-row feature DataFrame for inference.
+
+    ``lat`` and ``lon`` are forwarded as literal coordinate feature values for
+    models that include ``latitude``/``longitude`` columns.  They do **not**
+    drive any location-aware business logic (e.g. nearest-market selection).
+    """
     feature_names = _get_feature_names(model)
     features = pd.DataFrame(np.zeros((1, len(feature_names))), columns=feature_names)
 
@@ -208,6 +231,12 @@ def list_models():
 
 @app.get("/health")
 def health_check():
+    if _startup_error:
+        return {
+            "status": "unhealthy",
+            "error": _startup_error,
+            "models_loaded": [],
+        }
     return {
         "status": "ok",
         "models_loaded": sorted(commodity_models.keys()),
