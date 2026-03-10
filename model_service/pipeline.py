@@ -11,28 +11,38 @@ def _ensure_datetime(df: pd.DataFrame, date_col: str = "date") -> pd.DataFrame:
     return out
 
 
-def create_lag_features(df: pd.DataFrame, price_col: str = "modal_price") -> pd.DataFrame:
-    """Add lag features (1, 3, 7) for the given price column, grouped by market."""
-    out = _ensure_datetime(df)
-    out = out.sort_values(["market", "date"])
-    out["price_lag_1"] = out.groupby("market")[price_col].shift(1)
-    out["price_lag_3"] = out.groupby("market")[price_col].shift(3)
-    out["price_lag_7"] = out.groupby("market")[price_col].shift(7)
+def create_lag_features(
+    df: pd.DataFrame,
+    price_col: str = "modal_price",
+    group_col: str = "market",
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """Add lag features (1, 3, 7) for the given price column, grouped by the specified market column."""
+    out = _ensure_datetime(df, date_col=date_col)
+    out = out.sort_values([group_col, date_col])
+    out["price_lag_1"] = out.groupby(group_col)[price_col].shift(1)
+    out["price_lag_3"] = out.groupby(group_col)[price_col].shift(3)
+    out["price_lag_7"] = out.groupby(group_col)[price_col].shift(7)
     return out
 
 
-def create_rolling_features(df: pd.DataFrame, price_col: str = "modal_price") -> pd.DataFrame:
-    """Add rolling mean features (3, 7, 30) for the given price column, grouped by market."""
-    out = _ensure_datetime(df)
-    out = out.sort_values(["market", "date"])
+def create_rolling_features(
+    df: pd.DataFrame,
+    price_col: str = "modal_price",
+    group_col: str = "market",
+    date_col: str = "date",
+) -> pd.DataFrame:
+    """Add rolling mean features (3, 7, 30) for the given price column, grouped by the specified market column."""
+    out = _ensure_datetime(df, date_col=date_col)
+    out = out.sort_values([group_col, date_col])
     out["price_roll_mean_3"] = (
-        out.groupby("market")[price_col].transform(lambda s: s.rolling(window=3, min_periods=1).mean())
+        out.groupby(group_col)[price_col].transform(lambda s: s.rolling(window=3, min_periods=1).mean())
     )
     out["price_roll_mean_7"] = (
-        out.groupby("market")[price_col].transform(lambda s: s.rolling(window=7, min_periods=1).mean())
+        out.groupby(group_col)[price_col].transform(lambda s: s.rolling(window=7, min_periods=1).mean())
     )
     out["price_roll_mean_30"] = (
-        out.groupby("market")[price_col].transform(lambda s: s.rolling(window=30, min_periods=1).mean())
+        out.groupby(group_col)[price_col].transform(lambda s: s.rolling(window=30, min_periods=1).mean())
     )
     return out
 
