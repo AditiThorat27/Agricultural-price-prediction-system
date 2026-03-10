@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime
 
@@ -12,9 +13,10 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="Market Recommender Model Service")
-
 SERVICE_DIR = Path(__file__).resolve().parent
+
+# Populated during app startup via the lifespan hook.
+commodity_models: dict = {}
 
 
 class PredictionRequest(BaseModel):
@@ -24,8 +26,17 @@ class PredictionRequest(BaseModel):
 
 
 def _resolve_model_dir() -> Path:
-    """Return the models directory, supporting both local and Docker layouts."""
-    # Docker: models mounted as a sibling dir inside /app
+    """Return the models directory, supporting both local and Docker layouts.
+
+    Docker layout (docker-compose): the repo ``models/`` directory is mounted
+    at ``/app/models``, which is ``SERVICE_DIR / "models"`` because the whole
+    ``model_service/`` folder is the Docker WORKDIR (``/app``).
+
+    Local development: ``main.py`` lives inside ``model_service/``, so the
+    repo-root ``models/`` directory is one level up at
+    ``SERVICE_DIR.parent / "models"``.
+    """
+    # Docker: models mounted at /app/models (sub-directory of the WORKDIR)
     docker_path = SERVICE_DIR / "models"
     if docker_path.is_dir():
         return docker_path
@@ -33,8 +44,8 @@ def _resolve_model_dir() -> Path:
     return SERVICE_DIR.parent / "models"
 
 
-def load_models():
-    """Load all commodity models at startup."""
+def load_models() -> dict:
+    """Load all commodity models and return a mapping of name → model."""
     base_dir = _resolve_model_dir()
     model_names = ["onion", "potato", "tomato"]
 
@@ -50,7 +61,21 @@ def load_models():
     return models
 
 
-commodity_models = load_models()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load ML models on startup; release resources on shutdown."""
+    global commodity_models
+    try:
+        commodity_models = load_models()
+        logger.info("All models loaded successfully: %s", sorted(commodity_models))
+    except RuntimeError as exc:
+        logger.error("Model loading failed at startup: %s", exc)
+        # App still starts so /health can report the degraded state.
+    yield
+    commodity_models.clear()
+
+
+app = FastAPI(title="Market Recommender Model Service", lifespan=lifespan)
 
 
 def _get_feature_names(model) -> list[str]:
@@ -69,8 +94,19 @@ def _get_pandas_categories(model) -> list[list[str]]:
 
 
 def _build_placeholder_features(
-    commodity: str, model, lat: float, lon: float, mandi_override: str | None = None,
+    commodity: str,
+    model,
+    lat: float,
+    lon: float,
+    mandi_override: str | None = None,
 ) -> pd.DataFrame:
+    """Build a single-row feature DataFrame for inference.
+
+    ``lat`` and ``lon`` are the caller-supplied location coordinates.  They are
+    written into the ``latitude`` / ``longitude`` feature columns *if those
+    columns exist in the model's feature set*; models that were not trained with
+    location features will simply ignore these values.
+    """
     feature_names = _get_feature_names(model)
     features = pd.DataFrame(np.zeros((1, len(feature_names))), columns=feature_names)
 

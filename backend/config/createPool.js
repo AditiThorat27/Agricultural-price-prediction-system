@@ -4,18 +4,26 @@ const { Pool } = require('pg');
  * Create a PostgreSQL connection pool using either DATABASE_URL or individual
  * host/port/user/password/database environment variables.
  *
- * When DATABASE_URL is set, SSL is enabled. Set DB_INSECURE_SSL=true to allow
- * self-signed certificates (rejectUnauthorized: false).
+ * SSL is opt-in when DATABASE_URL is used:
+ *   DB_SSL=true            – enable SSL with full certificate verification
+ *   DB_INSECURE_SSL=true   – enable SSL but skip certificate verification
+ *                            (useful for self-signed certs in staging)
+ *   (default)              – no SSL (safe for local/dev Postgres)
  */
 function createPool() {
     const connectionString = process.env.DATABASE_URL;
 
     if (connectionString) {
+        let sslConfig = false;
+        if (process.env.DB_INSECURE_SSL === 'true') {
+            sslConfig = { rejectUnauthorized: false };
+        } else if (process.env.DB_SSL === 'true') {
+            sslConfig = { rejectUnauthorized: true };
+        }
+
         return new Pool({
             connectionString,
-            ssl: process.env.DB_INSECURE_SSL === 'true'
-                ? { rejectUnauthorized: false }
-                : true,
+            ssl: sslConfig,
         });
     }
 
