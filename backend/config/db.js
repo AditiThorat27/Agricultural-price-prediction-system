@@ -1,12 +1,21 @@
 const { Pool } = require('pg');
 
-const pool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    port: process.env.DB_PORT || 5432,
-    user: process.env.DB_USER || 'user',
-    password: process.env.DB_PASSWORD || 'password',
-    database: process.env.DB_NAME || 'marketdb',
-});
+const connectionString = process.env.DATABASE_URL;
+
+const pool = connectionString
+    ? new Pool({
+        connectionString,
+        ssl: {
+            rejectUnauthorized: false,
+        },
+    })
+    : new Pool({
+        host: process.env.DB_HOST || 'localhost',
+        port: process.env.DB_PORT || 5432,
+        user: process.env.DB_USER || 'user',
+        password: process.env.DB_PASSWORD || 'password',
+        database: process.env.DB_NAME || 'marketdb',
+    });
 
 module.exports = {
     query: (text, params) => pool.query(text, params),
