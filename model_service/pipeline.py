@@ -37,10 +37,41 @@ def create_rolling_features(df: pd.DataFrame, price_col: str = "modal_price") ->
     return out
 
 
-def create_volatility_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add simple volatility features based on daily price spread."""
+def create_volatility_features(
+    df: pd.DataFrame,
+    max_price_col: str | None = "Max_Price",
+    min_price_col: str | None = "Min_Price",
+    price_col: str = "modal_price",
+) -> pd.DataFrame:
+    """
+    Add simple volatility features based on daily price spread.
+
+    If both `max_price_col` and `min_price_col` are present in the dataframe,
+    `price_spread` is computed as their difference. Otherwise, if `price_col`
+    is present, a proxy spread is derived from that column using a small
+    rolling window (max - min). If none of these columns are available, the
+    `price_spread` column is created with missing values.
+    """
     out = df.copy()
-    out["price_spread"] = out["Max_Price"] - out["Min_Price"]
+
+    # Prefer explicitly provided max/min columns when available.
+    if (
+        max_price_col
+        and min_price_col
+        and max_price_col in out.columns
+        and min_price_col in out.columns
+    ):
+        out["price_spread"] = out[max_price_col] - out[min_price_col]
+
+    # Fall back to deriving a simple spread from a single price column.
+    elif price_col in out.columns:
+        # Use a 2-period rolling window as a simple approximation of local spread.
+        rolling = out[price_col].rolling(window=2, min_periods=1)
+        out["price_spread"] = rolling.max() - rolling.min()
+
+    # If no suitable columns are available, create a placeholder column.
+    else:
+        out["price_spread"] = pd.NA
     return out
 
 
