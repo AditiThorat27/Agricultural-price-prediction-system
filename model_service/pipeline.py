@@ -36,13 +36,13 @@ def create_rolling_features(
     out = _ensure_datetime(df, date_col=date_col)
     out = out.sort_values([group_col, date_col])
     out["price_roll_mean_3"] = (
-        out.groupby(group_col)[price_col].transform(lambda s: s.rolling(window=3, min_periods=1).mean())
+        out.groupby(group_col)[price_col].transform(lambda s: s.shift(1).rolling(window=3, min_periods=3).mean())
     )
     out["price_roll_mean_7"] = (
-        out.groupby(group_col)[price_col].transform(lambda s: s.rolling(window=7, min_periods=1).mean())
+        out.groupby(group_col)[price_col].transform(lambda s: s.shift(1).rolling(window=7, min_periods=7).mean())
     )
     out["price_roll_mean_30"] = (
-        out.groupby(group_col)[price_col].transform(lambda s: s.rolling(window=30, min_periods=1).mean())
+        out.groupby(group_col)[price_col].transform(lambda s: s.shift(1).rolling(window=30, min_periods=30).mean())
     )
     return out
 
@@ -52,6 +52,8 @@ def create_volatility_features(
     max_price_col: str | None = "Max_Price",
     min_price_col: str | None = "Min_Price",
     price_col: str = "modal_price",
+    group_col: str = "market",
+    date_col: str = "date",
 ) -> pd.DataFrame:
     """
     Add simple volatility features based on daily price spread.
@@ -59,8 +61,9 @@ def create_volatility_features(
     If both `max_price_col` and `min_price_col` are present in the dataframe,
     `price_spread` is computed as their difference. Otherwise, if `price_col`
     is present, a proxy spread is derived from that column using a small
-    rolling window (max - min). If none of these columns are available, the
-    `price_spread` column is created with missing values.
+    rolling window (max - min) **within each market group**. If none of these
+    columns are available, the `price_spread` column is created with missing
+    values.
     """
     out = df.copy()
 
@@ -75,9 +78,15 @@ def create_volatility_features(
 
     # Fall back to deriving a simple spread from a single price column.
     elif price_col in out.columns:
-        # Use a 2-period rolling window as a simple approximation of local spread.
-        rolling = out[price_col].rolling(window=2, min_periods=1)
-        out["price_spread"] = rolling.max() - rolling.min()
+        out = _ensure_datetime(out, date_col=date_col)
+        out = out.sort_values([group_col, date_col])
+        rolling_max = out.groupby(group_col)[price_col].transform(
+            lambda s: s.rolling(window=2, min_periods=1).max()
+        )
+        rolling_min = out.groupby(group_col)[price_col].transform(
+            lambda s: s.rolling(window=2, min_periods=1).min()
+        )
+        out["price_spread"] = rolling_max - rolling_min
 
     # If no suitable columns are available, create a placeholder column.
     else:

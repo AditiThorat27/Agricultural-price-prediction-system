@@ -68,7 +68,9 @@ def _get_pandas_categories(model) -> list[list[str]]:
     return getattr(booster, "pandas_categorical", []) or []
 
 
-def _build_placeholder_features(commodity: str, model, lat: float, lon: float) -> pd.DataFrame:
+def _build_placeholder_features(
+    commodity: str, model, lat: float, lon: float, mandi_override: str | None = None,
+) -> pd.DataFrame:
     feature_names = _get_feature_names(model)
     features = pd.DataFrame(np.zeros((1, len(feature_names))), columns=feature_names)
 
@@ -117,6 +119,8 @@ def _build_placeholder_features(commodity: str, model, lat: float, lon: float) -
         "rainfall_lag1": 0.0,
         "rainfall_7d_sum": 0.0,
         "rainfall_30d_sum": 0.0,
+        "latitude": lat,
+        "longitude": lon,
     }
 
     for column, value in placeholder_values.items():
@@ -128,7 +132,7 @@ def _build_placeholder_features(commodity: str, model, lat: float, lon: float) -
         column for column in feature_names if column in {"mandi_name", "district", "state", "variety"}
     ]
     categorical_defaults = {
-        "mandi_name": "Pune",
+        "mandi_name": mandi_override or "Pune",
         "district": "Pune",
         "state": "Maharashtra",
         "variety": "Local",
@@ -151,12 +155,38 @@ def predict_price(commodity: str, lat: float, lon: float) -> dict:
     if model is None:
         raise ValueError(f"Model for commodity '{commodity}' not found.")
 
-    features = _build_placeholder_features(commodity, model, lat, lon)
-    price = model.predict(features)[0]
+    # Determine available market names from the model's categorical metadata.
+    pandas_categories = _get_pandas_categories(model)
+    feature_names = _get_feature_names(model)
+    mandi_index = next(
+        (i for i, col in enumerate(feature_names) if col == "mandi_name"), None
+    )
+    market_names = (
+        pandas_categories[mandi_index]
+        if mandi_index is not None and mandi_index < len(pandas_categories) and pandas_categories[mandi_index]
+        else None
+    )
+
+    if market_names and len(market_names) > 1:
+        # Predict for each known market and pick the one with the lowest price.
+        best_market = None
+        best_price = float("inf")
+        for mandi in market_names:
+            features = _build_placeholder_features(
+                commodity, model, lat, lon, mandi_override=mandi,
+            )
+            price = float(model.predict(features)[0])
+            if price < best_price:
+                best_price = price
+                best_market = mandi
+    else:
+        features = _build_placeholder_features(commodity, model, lat, lon)
+        best_price = float(model.predict(features)[0])
+        best_market = market_names[0] if market_names else "Pune APMC"
 
     return {
-        "best_market": "Pune APMC",
-        "predicted_price": float(price),
+        "best_market": best_market,
+        "predicted_price": best_price,
     }
 
 

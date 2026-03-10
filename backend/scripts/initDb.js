@@ -2,22 +2,9 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env'
 
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
+const createPool = require('../config/createPool');
 
-const pool = process.env.DATABASE_URL
-    ? new Pool({
-        connectionString: process.env.DATABASE_URL,
-        ssl: process.env.DB_INSECURE_SSL === 'true'
-            ? { rejectUnauthorized: false }
-            : true,
-    })
-    : new Pool({
-        host: process.env.DB_HOST || 'localhost',
-        port: process.env.DB_PORT || 5432,
-        user: process.env.DB_USER || 'user',
-        password: process.env.DB_PASSWORD || 'password',
-        database: process.env.DB_NAME || 'marketdb',
-    });
+const pool = createPool();
 
 async function initDb() {
     const schemaPath = path.resolve(__dirname, '..', '..', 'db', 'schema.sql');
