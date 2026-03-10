@@ -5,9 +5,9 @@ const connectionString = process.env.DATABASE_URL;
 const pool = connectionString
     ? new Pool({
         connectionString,
-        ssl: {
-            rejectUnauthorized: false,
-        },
+        ssl: process.env.NODE_ENV === 'development'
+            ? { rejectUnauthorized: false }
+            : true,
     })
     : new Pool({
         host: process.env.DB_HOST || 'localhost',
